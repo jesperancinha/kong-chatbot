@@ -1,0 +1,26 @@
+.env
+.env.*
+!.env.example
+secrets/
+*.crt
+*.key
+
+/target/
+/build/
+/out/
+/.gradle/
+*.class
+*.jar
+
+# Logs and JVM crash dumps
+*.log
+hs_err_pid*
+
+# IDE metadata
+.idea/
+*.iml
+.vscode/
+
+# Operating-system files
+.DS_Store
+Thumbs.db

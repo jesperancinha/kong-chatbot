@@ -1,0 +1,66 @@
+services:
+  kong:
+    image: ${KONG_GATEWAY_IMAGE:-kong/kong-gateway:3.10.0.2}
+    restart: unless-stopped
+    environment:
+      KONG_ROLE: data_plane
+      KONG_DATABASE: "off"
+      KONG_VITALS: "off"
+      KONG_PROXY_LISTEN: "0.0.0.0:8000"
+      KONG_ADMIN_LISTEN: "off"
+      KONG_STATUS_LISTEN: "0.0.0.0:8100"
+      KONG_CLUSTER_MTLS: pki
+      KONG_CLUSTER_CONTROL_PLANE: ${KONG_CLUSTER_CONTROL_PLANE:?Set KONG_CLUSTER_CONTROL_PLANE in .env}
+      KONG_CLUSTER_SERVER_NAME: ${KONG_CLUSTER_SERVER_NAME:?Set KONG_CLUSTER_SERVER_NAME in .env}
+      KONG_CLUSTER_TELEMETRY_ENDPOINT: ${KONG_CLUSTER_TELEMETRY_ENDPOINT:?Set KONG_CLUSTER_TELEMETRY_ENDPOINT in .env}
+      KONG_CLUSTER_TELEMETRY_SERVER_NAME: ${KONG_CLUSTER_TELEMETRY_SERVER_NAME:?Set KONG_CLUSTER_TELEMETRY_SERVER_NAME in .env}
+      KONG_CLUSTER_CERT: /run/secrets/konnect-cluster.crt
+      KONG_CLUSTER_CERT_KEY: /run/secrets/konnect-cluster.key
+    ports:
+      - "8000:8000"
+    secrets:
+      - konnect-cluster.crt
+      - konnect-cluster.key
+    networks:
+      - chatbot
+
+  vector-db:
+    image: redis/redis-stack-server:7.4.0-v3
+    restart: unless-stopped
+    command: ["redis-stack-server", "--requirepass", "${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}"]
+    volumes:
+      - vector_data:/data
+    networks:
+      - chatbot
+
+  chatbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: 8080
+      KONG_URL: http://kong:8000
+      KONG_RAG_ROUTE: ${KONG_RAG_ROUTE:-/rag/v1/chat/completions}
+      KONG_SUPPORT_ROUTE: ${KONG_SUPPORT_ROUTE:-/support/v1/chat/completions}
+      KONG_MODEL: ${KONG_MODEL:-my-gpt}
+      KONG_CONNECT_TIMEOUT: ${KONG_CONNECT_TIMEOUT:-2s}
+      KONG_READ_TIMEOUT: ${KONG_READ_TIMEOUT:-30s}
+    depends_on:
+      - kong
+    ports:
+      - "8080:8080"
+    networks:
+      - chatbot
+
+networks:
+  chatbot:
+
+volumes:
+  vector_data:
+
+secrets:
+  konnect-cluster.crt:
+    file: ./secrets/konnect-cluster.crt
+  konnect-cluster.key:
+    file: ./secrets/konnect-cluster.key
