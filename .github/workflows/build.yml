@@ -1,0 +1,32 @@
+name: Build public-transport-declarer
+
+on:
+  push:
+    branches: [ master ]
+
+jobs:
+  build-test-coverage-report:
+    runs-on: ubuntu-latest
+    steps:
+        - uses: actions/checkout@v7
+        - uses: graalvm/setup-graalvm@v1
+          with:
+            version: 'latest'
+            java-version: '25'
+            github-token: ${{ secrets.GITHUB_TOKEN }}
+
+        - name: Build and Test
+          run:  mvn clean install jacoco:prepare-agent package jacoco:report
+
+        - name: Coverage Reports
+          run: mvn omni-coveragereporter:report
+          env:
+             COVERALLS_REPO_TOKEN: ${{ secrets.COVERALLS_REPO_TOKEN }}
+             CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+             CODACY_PROJECT_TOKEN: ${{ secrets.CODACY_PROJECT_TOKEN }}
+
+        - name: Build Jars
+          run: make build-maven-jar
+
+        - name: Create GraalVM image via command
+          run: make create-native

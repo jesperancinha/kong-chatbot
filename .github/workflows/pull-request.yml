@@ -1,0 +1,25 @@
+name: PR public-transport-declarer
+
+on:
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+        - uses: actions/checkout@v7
+        - uses: graalvm/setup-graalvm@v1
+          with:
+            version: 'latest'
+            java-version: '25'
+            github-token: ${{ secrets.GITHUB_TOKEN }}
+
+        - name: Build and Test
+          run:  mvn clean install jacoco:prepare-agent package jacoco:report
+
+        - name: Build Jars
+          run: make build-maven-jar
+
+        - name: Create GraalVM image via command
+          run: make create-native
