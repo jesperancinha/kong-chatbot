@@ -1,4 +1,4 @@
-name: Updates java
+name: Update Java version
 
 on:
   schedule:

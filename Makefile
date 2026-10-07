@@ -9,7 +9,7 @@ COMPOSE_ARGS ?=
 
 COMPOSE_ENV = $(COMPOSE) --env-file $(ENV_FILE) $(COMPOSE_ARGS)
 
-.PHONY: help env setup-example-env build package test clean up down restart logs ps config host-run
+.PHONY: help env setup-example-env build package test verify clean up down restart logs ps config host-run java-version deps-java-update deps-plugins-update
 
 help:
 	@printf '%s\n' \
@@ -19,6 +19,7 @@ help:
 		'  make build     Build the chatbot Docker image' \
 		'  make package  Package the application with Maven' \
 		'  make test     Run the Maven tests' \
+		'  make verify   Run the Maven verification lifecycle' \
 		'  make clean    Clean Maven build output' \
 		'  make up       Build and start the full Compose stack' \
 		'  make down     Stop the Compose stack (preserve named volumes)' \
@@ -27,6 +28,9 @@ help:
 		'  make ps       Show Compose service status' \
 		'  make config   Validate and print resolved Compose configuration' \
 		'  make host-run Run Spring Boot on the host (Kong must be reachable)' \
+		'  make java-version  Print the Java version configured in pom.xml' \
+		'  JAVA_VERSION=21 make deps-java-update  Set the Maven Java version property' \
+		'  make deps-plugins-update  Update Kotlin dependency version properties' \
 		'' \
 		'Common overrides: ENV_FILE=.env.dev, MVN=mvn, MVN_ARGS="-DskipTests"'
 
@@ -47,6 +51,9 @@ package:
 
 test:
 	$(MVN) $(MVN_ARGS) test
+
+verify:
+	$(MVN) $(MVN_ARGS) --batch-mode --no-transfer-progress verify
 
 clean:
 	$(MVN) $(MVN_ARGS) clean
@@ -71,3 +78,15 @@ config:
 
 host-run:
 	$(MVN) $(MVN_ARGS) spring-boot:run
+
+deps-plugins-update:
+	curl -sL https://raw.githubusercontent.com/jesperancinha/project-signer/master/pluginUpdatesOne.sh | bash -s -- $(PARAMS)
+deps-java-update:
+	curl -sL https://raw.githubusercontent.com/jesperancinha/project-signer/master/javaUpdatesOne.sh | bash
+deps-node-update:
+	curl -sL https://raw.githubusercontent.com/jesperancinha/project-signer/master/nodeUpdatesOne.sh | bash
+deps-quick-update:  deps-plugins-update deps-java-update deps-node-update
+update-repo-prs:
+	curl -sL https://raw.githubusercontent.com/jesperancinha/project-signer/master/update-all-repo-prs.sh | bash
+accept-prs:
+	curl -sL https://raw.githubusercontent.com/jesperancinha/project-signer/master/acceptPR.sh | bash

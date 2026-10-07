@@ -1,8 +1,8 @@
-name: Build public-transport-declarer
+name: Build Kong Chatbot
 
 on:
   push:
-    branches: [ master ]
+    branches: [ main ]
 
 jobs:
   build-test-coverage-report:
