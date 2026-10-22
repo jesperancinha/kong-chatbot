@@ -1,0 +1,9 @@
+# Replace these values with the endpoints shown for your Konnect data plane.
+kong_cluster_control_plane       = "replace-with-control-plane-host:443"
+kong_cluster_server_name         = "replace-with-control-plane-host"
+kong_cluster_telemetry_endpoint  = "replace-with-telemetry-host:443"
+kong_cluster_telemetry_server_name = "replace-with-telemetry-host"
+
+# The defaults point to the certificate files used in the README.
+# konnect_cluster_cert_path = "../secrets/konnect-cluster.crt"
+# konnect_cluster_key_path  = "../secrets/konnect-cluster.key"

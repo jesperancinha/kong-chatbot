@@ -6,10 +6,11 @@ DOCKER ?= docker
 COMPOSE ?= $(DOCKER) compose
 ENV_FILE ?= .env
 COMPOSE_ARGS ?=
+TERRAFORM ?= terraform
 
 COMPOSE_ENV = $(COMPOSE) --env-file $(ENV_FILE) $(COMPOSE_ARGS)
 
-.PHONY: help env setup-example-env build package test verify clean up down restart logs ps config host-run java-version deps-java-update deps-plugins-update
+.PHONY: help env setup-example-env build package test verify clean up down restart logs ps config host-run java-version deps-java-update deps-plugins-update terraform-init terraform-plan terraform-up terraform-down
 
 help:
 	@printf '%s\n' \
@@ -28,6 +29,10 @@ help:
 		'  make ps       Show Compose service status' \
 		'  make config   Validate and print resolved Compose configuration' \
 		'  make host-run Run Spring Boot on the host (Kong must be reachable)' \
+		'  make terraform-init  Initialize the Terraform Docker deployment' \
+		'  make terraform-plan  Preview Terraform container changes' \
+		'  make terraform-up    Start Kong, Redis Stack, and the chatbot with Terraform' \
+		'  make terraform-down  Stop and remove Terraform-managed containers and network' \
 		'  make java-version  Print the Java version configured in pom.xml' \
 		'  JAVA_VERSION=21 make deps-java-update  Set the Maven Java version property' \
 		'  make deps-plugins-update  Update Kotlin dependency version properties' \
@@ -78,6 +83,18 @@ config:
 
 host-run:
 	$(MVN) $(MVN_ARGS) spring-boot:run
+
+terraform-init:
+	$(TERRAFORM) -chdir=terraform init
+
+terraform-plan: terraform-init
+	$(TERRAFORM) -chdir=terraform plan
+
+terraform-up: terraform-init
+	$(TERRAFORM) -chdir=terraform apply
+
+terraform-down: terraform-init
+	$(TERRAFORM) -chdir=terraform destroy
 
 deps-plugins-update:
 	curl -sL https://raw.githubusercontent.com/jesperancinha/project-signer/master/pluginUpdatesOne.sh | bash -s -- $(PARAMS)

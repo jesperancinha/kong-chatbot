@@ -4,6 +4,12 @@
 secrets/
 *.crt
 *.key
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfvars
+terraform/*.tfvars.json
+terraform/crash.log
 
 /target/
 /build/

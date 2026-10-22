@@ -41,6 +41,26 @@ Use `docker compose logs -f kong` or `make logs` to check data-plane connectivit
 
 For a host-run Spring app instead, configure `KONG_URL=http://localhost:8000` in the environment and start the API with `mvn spring-boot:run`.
 
+## Run the stack with Terraform
+
+Terraform can create the same local components using the Docker provider: a Konnect-connected Kong data plane, Redis Stack with a persistent vector-data volume, and this chatbot API. It requires Docker, Terraform 1.5+, a configured Konnect control plane/data-plane certificate, and Konnect routes/plugins set up as described above. It does not create Konnect resources, provider credentials, the RAG index, or ingest documents. Configure the AI Proxy and RAG Injector in Konnect, and point the injector at Redis host `vector-db`, port `6379`, using the same Redis password supplied below. The Redis container is only reachable on the private Docker network.
+
+Copy the cluster certificate and key into `secrets/` as in the Compose instructions, then create a local Terraform variables file:
+
+```bash
+cp terraform/terraform.tfvars.example terraform/terraform.tfvars
+# Edit terraform/terraform.tfvars with your Konnect endpoint and TLS server-name values.
+export TF_VAR_redis_password="$(openssl rand -hex 24)"
+# Configure this same password in the Konnect RAG Injector.
+make terraform-init
+make terraform-plan
+make terraform-up
+```
+
+Terraform mounts the certificate files read-only, builds the chatbot image, and binds the API (`http://127.0.0.1:8080`) and Kong proxy (`http://127.0.0.1:8000`) to loopback only. Use `make terraform-down` to remove the Terraform-managed containers, network, and Redis volume; **destroying the volume permanently deletes the local vector index**. Do not run Compose and Terraform stacks simultaneously because they use the same host ports and duplicate the services.
+
+The Terraform state contains the Redis password because Docker needs it to start the container. Keep `terraform/terraform.tfstate` private and backed up securely; it is git-ignored. Prefer passing secrets through `TF_VAR_redis_password` rather than committing them in a variables file.
+
 Example:
 
 ```bash
