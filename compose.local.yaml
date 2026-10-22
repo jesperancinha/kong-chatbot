@@ -1,0 +1,77 @@
+name: kong-chatbot-local
+
+services:
+  ollama:
+    image: ${OLLAMA_IMAGE:-ollama/ollama:0.13.5}
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks: [chatbot]
+
+  models:
+    image: ${OLLAMA_IMAGE:-ollama/ollama:0.13.5}
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      CHAT_MODEL: ${LOCAL_CHAT_MODEL:-qwen2.5:1.5b}
+      EMBEDDING_MODEL: ${LOCAL_EMBEDDING_MODEL:-nomic-embed-text}
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - 'ollama pull "$$CHAT_MODEL" && ollama pull "$$EMBEDDING_MODEL"'
+    depends_on:
+      ollama:
+        condition: service_healthy
+    networks: [chatbot]
+
+  kong:
+    image: ${KONG_LOCAL_IMAGE:-kong:3.9.4}
+    restart: unless-stopped
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /etc/kong/local.yaml
+      KONG_PROXY_LISTEN: 0.0.0.0:8000
+      KONG_ADMIN_LISTEN: "off"
+      KONG_STATUS_LISTEN: 0.0.0.0:8100
+    volumes:
+      - ./kong/local.yaml:/etc/kong/local.yaml:ro
+    ports:
+      - "127.0.0.1:${KONG_PROXY_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks: [chatbot]
+
+  chatbot:
+    build: .
+    restart: unless-stopped
+    environment:
+      PORT: 8080
+      KONG_URL: http://kong:8000
+      KONG_MODEL: ${LOCAL_CHAT_MODEL:-qwen2.5:1.5b}
+      KONG_READ_TIMEOUT: ${LOCAL_READ_TIMEOUT:-180s}
+      RAG_MODE: local
+      RAG_DOCUMENTS_PATH: /app/knowledge
+      RAG_EMBEDDING_MODEL: ${LOCAL_EMBEDDING_MODEL:-nomic-embed-text}
+      KONG_EMBEDDINGS_ROUTE: /embeddings/api/embed
+    volumes:
+      - ./knowledge:/app/knowledge:ro
+    ports:
+      - "127.0.0.1:${CHATBOT_PORT:-8080}:8080"
+    depends_on:
+      models:
+        condition: service_completed_successfully
+      kong:
+        condition: service_healthy
+    networks: [chatbot]
+
+networks:
+  chatbot:
+
+volumes:
+  ollama_data:

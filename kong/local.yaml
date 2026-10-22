@@ -1,0 +1,22 @@
+_format_version: "3.0"
+_transform: true
+
+# OSS Kong performs ordinary HTTP proxying; paid AI plugins are not needed.
+services:
+  - name: ollama-chat
+    url: http://ollama:11434/v1/chat/completions
+    read_timeout: 180000
+    routes:
+      - name: rag-chat
+        paths: [/rag/v1/chat/completions]
+        strip_path: true
+      - name: support-chat
+        paths: [/support/v1/chat/completions]
+        strip_path: true
+  - name: ollama-embeddings
+    url: http://ollama:11434/api/embed
+    read_timeout: 180000
+    routes:
+      - name: embeddings
+        paths: [/embeddings/api/embed]
+        strip_path: true
