@@ -1,128 +1,165 @@
-# Kotlin chatbot with Kong AI Gateway
+# RAG chatbot with Spring Boot and Kong
 
-This Spring Boot API exposes two chatbot flows and delegates all model calls to Kong AI Gateway. It contains no provider credentials and does not call a model provider directly.
+Two interchangeable development stacks expose the same Kotlin/Spring Boot API:
+
+| Mode | Gateway | Retrieval | Models | Account required |
+|---|---|---|---|---|
+| `local` (default) | Free OSS Kong, DB-less HTTP proxy | Spring Boot chunks documents, embeds and searches an in-memory vector index | Local Ollama | No |
+| `konnect` | Self-managed Kong Enterprise data plane, managed by Konnect | Kong AI RAG Injector and Redis Stack | OpenAI through Kong AI Proxy | Konnect, appropriate AI Gateway entitlement, OpenAI |
+
+Local mode deliberately uses **ordinary Kong proxy routes**, not proprietary AI plugins. It is a real embedding/retrieval/generation flow, not a mock. Konnect mode keeps retrieval and model credentials in Kong; Spring only forwards chat requests and supplies system instructions.
 
 ```text
-Client -> Kotlin/Spring API -> Kong AI Gateway -> AI provider
-                                |-> RAG retrieval and vector store (RAG route)
-                                |-> AI guardrails and policy plugins (support route)
+Local:
+  Client -> Spring Boot -> Kong OSS -> Ollama chat model
+              |               |
+              +-> embeddings -+-> Ollama embedding model
+              +-> in-memory vector search over knowledge/*.md and *.txt
+
+Konnect:
+  Client -> Spring Boot -> Kong data plane -> AI Proxy -> OpenAI
+                               |
+                               +-> AI RAG Injector -> Redis vector index
+                               ^
+                         Konnect control plane (mTLS)
 ```
 
-## Chat flows
+## What was missing
 
-| Endpoint | Kong route | Purpose |
-|---|---|---|
-| `POST /api/rag/chat` | `/rag/v1/chat/completions` | Production-style RAG answers grounded in retrieved knowledge |
-| `POST /api/support/chat` | `/support/v1/chat/completions` | Customer support with a conservative support policy |
-| `POST /api/chat` | Same as the RAG route | Compatibility alias |
+The original repository provided a Spring-to-Kong integration and containers, but not a runnable RAG system: there was no document ingestion, index initialization, model provisioning, or gateway route/plugin provisioning. It also required external Konnect setup for every local run, and its Java 21 Docker images could not compile the Java 25 application.
 
-Request: `{"message":"How do I verify a production deployment?"}`. Response: `{"response":"..."}`.
+The local stack now provisions its routes, downloads models, indexes sample documents and waits for API readiness. The Konnect bootstrap automates the remote configuration and local certificate/environment generation; ingestion is a separate explicit operation because it sends knowledge documents to the configured external embedding provider.
 
-The application validates that messages are non-empty and no longer than 8,000 characters. RAG and support system instructions are supplied separately. These instructions are defense in depth, not a security boundary: configure and enforce retrieval, moderation/guardrails, authentication, authorization, and rate limits in Kong. Attach a RAG injector and its vector-store configuration to each route that needs knowledge grounding, and apply the appropriate AI guardrail/policy plugins to the support route. Ensure both Kong routes accept OpenAI-compatible chat-completion requests and use the model alias configured below.
+## Start locally
 
-## Run locally with Docker Compose and Konnect
-
-The Compose stack runs the Spring API, a Kong Gateway **data plane** connected to Kong Konnect, and a Redis Stack vector database for local RAG. Konnect's control plane and model provider remain managed/external services; Compose does not create those. The AI Gateway/RAG plugin availability depends on your Kong license and Konnect plan.
-
-1. Create a Konnect control plane and register a self-managed data plane node in Runtime Manager. Download that node's cluster certificate and key, and copy them to `secrets/konnect-cluster.crt` and `secrets/konnect-cluster.key`. Keep those files private; `secrets/` and `.env` are git-ignored.
-2. Copy `.env.example` to `.env`. Replace the cluster and telemetry endpoint/hostname examples with the values shown for your data plane in Konnect. Set `REDIS_PASSWORD` to a strong local password. Use a Kong Gateway image version compatible with the Konnect control plane.
-3. In Konnect, configure the RAG and support services/routes with the paths in `.env`. Configure model credentials and provider routing in Konnect, not in this application. For RAG, configure the AI RAG Injector (and its required AI Proxy/embedding settings) to use Redis at `vector-db:6379`, with the `REDIS_PASSWORD` from `.env`; ensure its vector index has been populated with your knowledge documents. Configure the supported guardrail/policy plugins on the support route. The Konnect-managed configuration is delivered to the local data plane.
-4. Create a sample local environment file, edit it with your Konnect and Redis values, then build/start the containers:
+Install Docker with Compose v2, `make` and `curl`. No host JVM, Maven, Terraform, account, API key or Kong license is needed for Compose. Allow several GB of disk and memory for the images/models; Docker runs Ollama on CPU by default, including on macOS. First startup downloads models and can take several minutes.
 
 ```bash
-make setup-example-env
-# Edit .env and replace the example Konnect endpoints and Redis password.
 make up
+make smoke       # requires jq; exercises RAG, support, alias and invalid input
+make logs
+make down        # preserves downloaded models
 ```
 
-The API is available at `http://localhost:8080`; Kong's local proxy is at `http://localhost:8000`. The vector database is only exposed on the private Compose network. Stop the stack with `Ctrl+C`, or run `docker compose down`; a named volume preserves the vector index. Use `docker compose down -v` only when you intend to delete that data.
+`make up` creates a private `.env` only if absent. Defaults are `qwen2.5:1.5b` for chat and `nomic-embed-text` for embeddings. Override `LOCAL_CHAT_MODEL` and `LOCAL_EMBEDDING_MODEL` in `.env` before starting. Different embedding models require rebuilding the index, which happens automatically on application startup.
 
-Use `docker compose logs -f kong` or `make logs` to check data-plane connectivity. A successful container start alone does not mean the data plane has connected to Konnect or received route configuration. `make help` lists the available targets. `make setup-example-env` (also available as `make env`) creates `.env` from `.env.example` without overwriting an existing `.env`. Useful commands include `make test`, `make package`, `make build`, `make ps`, `make config`, and `make down`. `make down` preserves the vector database volume; `docker compose down -v` deletes it.
-
-For a host-run Spring app instead, configure `KONG_URL=http://localhost:8000` in the environment and start the API with `mvn spring-boot:run`.
-
-## Run the stack with Terraform
-
-Terraform can create the same local components using the Docker provider: a Konnect-connected Kong data plane, Redis Stack with a persistent vector-data volume, and this chatbot API. It requires Docker, Terraform 1.5+, a configured Konnect control plane/data-plane certificate, and Konnect routes/plugins set up as described above. It does not create Konnect resources, provider credentials, the RAG index, or ingest documents. Configure the AI Proxy and RAG Injector in Konnect, and point the injector at Redis host `vector-db`, port `6379`, using the same Redis password supplied below. The Redis container is only reachable on the private Docker network.
-
-Copy the cluster certificate and key into `secrets/` as in the Compose instructions, then create a local Terraform variables file:
+The API listens at `http://127.0.0.1:8080`, Kong at `http://127.0.0.1:8000`. Ollama is private to the Docker network; Kong's Admin API is disabled. Only loopback ports are published. `/health` reports application readiness, including completed local indexing, not end-to-end provider availability.
 
 ```bash
-cp terraform/terraform.tfvars.example terraform/terraform.tfvars
-# Edit terraform/terraform.tfvars with your Konnect endpoint and TLS server-name values.
-export TF_VAR_redis_password="$(openssl rand -hex 24)"
-# Configure this same password in the Konnect RAG Injector.
-make terraform-init
+curl --fail-with-body http://127.0.0.1:8080/api/rag/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"What is the project release checklist?"}'
+```
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/rag/chat` | Grounded answers |
+| `POST /api/support/chat` | Grounded answers with a conservative support policy |
+| `POST /api/chat` | Compatibility alias for RAG |
+| `GET /health` | Application readiness |
+
+Chat requests use `{"message":"..."}` and responses use `{"response":"..."}`. Messages must contain 1-8,000 characters. Model/gateway failures return HTTP 502.
+
+### Your own knowledge
+
+Place UTF-8 Markdown/text files in `knowledge/`, then run `make restart`. Files are mounted read-only; local embeddings and the index are rebuilt on startup. Local mode fails startup explicitly if knowledge cannot be indexed. It does not silently downgrade to an ungrounded chatbot.
+
+The in-memory index is intentionally a small-corpus development implementation, not a multi-tenant production store. Source titles are included in context so the model can cite them. Similarity thresholds are heuristics, not guarantees of answer correctness or resistance to prompt injection. Small local models can still hallucinate.
+
+Useful application settings are `RAG_TOP_K`, `RAG_MIN_SCORE`, `RAG_DOCUMENTS_PATH`, `RAG_EMBEDDING_MODEL`, `KONG_EMBEDDINGS_ROUTE`, `KONG_CONNECT_TIMEOUT`, and `KONG_READ_TIMEOUT`. Container settings belong in the Compose environment block (or its Terraform equivalent); arbitrary `.env` values are not automatically forwarded to the JVM.
+
+## Switch modes
+
+```bash
+make MODE=konnect switch    # after Konnect bootstrap below
+make MODE=local switch
+```
+
+`switch` stops the other **Compose** stack before starting the selected stack. It retains both modes' named volumes. `MODE` applies to `up`, `down`, `logs`, `ps`, `config`, `build`, and Terraform targets. Local settings use `.env`; Konnect uses `.env.konnect`. Both stacks bind the same host ports and must not run simultaneously.
+
+Do not mix Compose and Terraform deployments on the same ports. Stop the current deployment using the tool that created it before changing tools. `docker compose down -v` and `terraform destroy` delete managed volumes and their data; ordinary `make down` does not.
+
+## Konnect mode
+
+Konnect and the model provider remain external managed services. Bootstrap requires `curl`, `jq`, OpenSSL, a Konnect personal access token with control-plane configuration permissions, and an OpenAI API key. Use a **dedicated** compatible hybrid control plane; bootstrap manages project-named services/routes/plugins, not an entire organization.
+
+Provider credentials are sent only to your selected Konnect regional API and stored in Kong configuration; never put them in source control. Knowledge documents are sent to the external embedding provider during ingestion and as retrieved context during generation. Use only data approved for those services.
+
+The exact bootstrap and ingestion steps and Kong references are documented below.
+
+```bash
+# Create a dedicated hybrid control plane in Konnect first.
+export KONNECT_REGION=eu                 # us, eu, au, in, me or sg
+export KONNECT_CONTROL_PLANE_ID=...      # control-plane UUID
+export KONNECT_TOKEN=...                 # PAT, not committed or saved
+export OPENAI_API_KEY=...                # stored in Kong configuration
+make konnect-bootstrap
+make MODE=konnect switch
+
+# Only needed for the temporary, standalone ingestion worker:
+export KONG_LICENSE_DATA='...'           # JSON AI Gateway Enterprise license
+make konnect-ingest
+make smoke
+```
+
+Bootstrap reads the control plane's real connection/SNI hostnames, registers the public node certificate (the private key stays local), and upserts only the project-named service/routes and its AI Proxy Advanced/RAG Injector plugins. Re-running bootstrap updates configuration and reuses the Redis password. It generates private `.env.konnect`, `terraform/konnect.tfvars` and `secrets/` configuration. Rotate the self-signed node certificate before its one-year expiry. Match `KONG_GATEWAY_IMAGE` to a version supported by your control plane; the documented Enterprise default is `3.16.0.1`. OSS is separately pinned to `3.9.4`.
+
+**Ingestion is deliberately not sent to a made-up Konnect API.** Kong documents `POST /ai-rag-injector/{plugin_id}/ingest_chunk` on the traditional Admin API, and its ingestion tutorial is marked on-prem only. Therefore `make konnect-ingest` starts a temporary **standalone Enterprise** worker with PostgreSQL on the Konnect stack's private network, using the same plugin ID, namespace, embedding model and Redis as the Konnect-managed data plane. Its Admin API is bound to a random loopback port and its proxy is disabled. Both temporary containers are removed on exit. This works with either the Compose or Terraform Konnect stack and never starts in local OSS mode.
+
+That worker requires a **standalone AI Gateway Enterprise license**; do not assume a Konnect subscription also licenses standalone nodes. If your organization cannot provide one, use Kong's supported ingestion infrastructure for that account or use the fully local mode. No license/token is bundled. The Enterprise workflow cannot be exercised end-to-end without these external credentials and entitlements.
+
+Documents are chunked before ingestion; requests include the source file name. The shared namespace is `kong_chatbot_v1`, embeddings use `text-embedding-3-large` (3,072 dimensions), and embedding/vector failures stop requests rather than silently dropping RAG. Re-running ingestion **adds** chunks, so avoid repeatedly ingesting unchanged documents. For changed or removed documents, deliberately clear/recreate the development Redis volume and ingest the complete corpus; this deletes all knowledge in that volume. The temporary worker has no chat traffic and is not the Konnect data plane.
+
+`secrets/konnect-rag-plugin.json` contains the provider key, `secrets/kong-license.json` contains the worker license, and `.env.konnect` contains the Redis password. All are git-ignored and created with owner-only permissions. Delete/rotate them according to your organization's policy.
+
+### Official Kong references
+
+The configuration follows Kong's published sources, with OSS and Enterprise kept separate:
+
+- [OSS 3.9.4 release](https://github.com/Kong/kong/releases/tag/3.9.4) and [DB-less declarative configuration](https://developer.konghq.com/gateway/db-less-mode/).
+- [Gateway Docker installation](https://developer.konghq.com/gateway/install/docker/) and [version support policy](https://developer.konghq.com/gateway/version-support-policy/) (3.14 is the LTS family; select an appropriate current patch if your organization standardizes on LTS).
+- [AI RAG Injector requirements and Redis modules](https://developer.konghq.com/plugins/ai-rag-injector/), [configuration](https://developer.konghq.com/plugins/ai-rag-injector/reference/), [Admin ingestion API](https://developer.konghq.com/plugins/ai-rag-injector/api/) and [official on-prem ingestion example](https://developer.konghq.com/ai-gateway/v1/how-to/use-ai-rag-injector-plugin/).
+- [Konnect control-plane API source](https://github.com/Kong/developer.konghq.com/blob/main/api-specs/konnect/control-planes/v2/openapi.yaml) and [core-entity API source](https://github.com/Kong/developer.konghq.com/blob/main/api-specs/konnect/control-planes-config/v2/openapi.yaml).
+
+## Terraform deployment
+
+The Terraform root deploys to the **local Docker daemon**, not AWS, Azure or another cloud. Cloud deployment still needs a chosen platform, networking, persistent storage, a registry and platform-specific Terraform resources.
+
+Install Terraform 1.5+ and Docker with Buildx. The Make targets automatically pass the active Docker context's endpoint and Buildx builder to the Terraform Docker provider, which otherwise defaults to `/var/run/docker.sock` and its legacy builder. They respect explicit `DOCKER_HOST` and `TF_VAR_docker_builder` overrides. If running Terraform directly instead of through Make, set those variables yourself so the provider and CLI target the same daemon/builder.
+
+```bash
 make terraform-plan
 make terraform-up
+make smoke
+make terraform-down
 ```
 
-Terraform mounts the certificate files read-only, builds the chatbot image, and binds the API (`http://127.0.0.1:8080`) and Kong proxy (`http://127.0.0.1:8000`) to loopback only. Use `make terraform-down` to remove the Terraform-managed containers, network, and Redis volume; **destroying the volume permanently deletes the local vector index**. Do not run Compose and Terraform stacks simultaneously because they use the same host ports and duplicate the services.
+Local is the default and requires no certificate or remote credentials. Terraform builds the Java 25 image, starts Ollama and Kong, downloads both models, then starts Spring. `make terraform-up` also waits for API readiness after apply; a raw `terraform apply` does not.
 
-The Terraform state contains the Redis password because Docker needs it to start the container. Keep `terraform/terraform.tfstate` private and backed up securely; it is git-ignored. Prefer passing secrets through `TF_VAR_redis_password` rather than committing them in a variables file.
-
-Example:
+For Konnect, first bootstrap, then:
 
 ```bash
-curl -X POST http://localhost:8080/api/rag/chat \
-  -H 'Content-Type: application/json' \
-  -d '{"message":"How do we verify a production deployment?"}'
-
-curl -X POST http://localhost:8080/api/support/chat \
-  -H 'Content-Type: application/json' \
-  -d '{"message":"How can I update my account email?"}'
+make MODE=konnect terraform-plan
+make MODE=konnect terraform-up
+make konnect-ingest
+make smoke
+make MODE=konnect terraform-down
 ```
 
-`KONG_URL` is the gateway base URL. `KONG_RAG_ROUTE` and `KONG_SUPPORT_ROUTE` select the two Kong paths; `KONG_MODEL` is the model alias recognized by Kong. Connect and read timeouts are configurable with `KONG_CONNECT_TIMEOUT` and `KONG_READ_TIMEOUT`. A gateway failure is returned as HTTP 502.
+Bootstrap generates a private `terraform/konnect.tfvars` containing the endpoints and Redis password. Terraform state also contains the Redis password; secure and back up the state. No provider API key is written to Terraform state by these Docker resources. Switching Terraform's `mode` replaces the mode-specific containers but retains model/index volumes until destroy.
 
-## Production deployment notes
+## Host development
 
-This repository provides the chatbot API and gateway integration, not a complete deployment platform. Before exposing it to customers, add the application's identity/session authorization, tenant-scoped retrieval and data access, conversation persistence/retention policy, audit/trace correlation, monitoring, and deployment-specific secret/config management. Kong should enforce provider routing and credentials, RAG retrieval, guardrails, quotas/rate limits, and AI traffic observability.
-
-## Tests
+With Kong and Ollama running from the local Compose stack, run Spring on the host instead of the API container:
 
 ```bash
-mvn test
+docker compose -f compose.local.yaml stop chatbot
+RAG_MODE=local KONG_MODEL=qwen2.5:1.5b KONG_READ_TIMEOUT=180s \
+  mvn spring-boot:run
 ```
 
-## Complete architecture
+This requires JDK 25 and Maven. The default host document directory is `knowledge/`; default gateway URL is `http://localhost:8000`. `mvn test` runs the application tests.
 
-```mermaid
-flowchart LR
-    user["User / client"]
+## Production boundaries
 
-    subgraph local["Local Docker Compose"]
-        api["Kotlin / Spring Boot API<br/>:8080<br/>Request validation and chat policy"]
-        dp["Kong Gateway data plane<br/>:8000<br/>Proxy, AI plugins, routing"]
-        redis[("Redis Stack<br/>Vector index<br/>private Compose network")]
-
-        api -->|"OpenAI-compatible chat completion<br/>RAG or support route"| dp
-        dp -->|"RAG retrieval and context injection"| redis
-    end
-
-    subgraph konnect["Kong Konnect (managed)"]
-        cp["Konnect control plane<br/>Routes, services, plugin policies"]
-        ai["AI Gateway configuration<br/>Provider credentials and model alias"]
-        rag["RAG Injector configuration<br/>Embeddings, Redis connection, retrieval"]
-        guardrails["Support route guardrails<br/>Moderation and policy plugins"]
-        cp --> ai
-        cp --> rag
-        cp --> guardrails
-    end
-
-    provider["AI model provider"]
-    knowledge["Knowledge documents<br/>Ingestion and indexing"]
-    embeddings["Embedding model"]
-
-    user -->|"POST /api/rag/chat<br/>or /api/support/chat"| api
-    dp <-->|"mTLS configuration sync<br/>outbound connection"| cp
-    dp -->|"Configured AI request"| provider
-    dp -->|"Embedding / retrieval request"| embeddings
-    knowledge -->|"Chunk and embed, then index<br/>(ingestion is not included in Compose)"| redis
-    knowledge --> embeddings
-
-    classDef managed fill:#e8f1ff,stroke:#2864a6,color:#123;
-    classDef local fill:#edfaef,stroke:#38834a,color:#123;
-    class cp,ai,rag,guardrails managed;
-    class api,dp,redis local;
-```
+This is a local development/reference deployment, not a production platform. Before exposure, add identity/session authorization, tenant-scoped retrieval, knowledge access controls, conversation retention, tracing/monitoring, backup/restore, secret management, TLS and capacity planning. System instructions are defense in depth, **not** a security boundary. The support instructions do not implement a moderation/guardrail plugin.

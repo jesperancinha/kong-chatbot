@@ -1,9 +1,10 @@
 services:
   kong:
-    image: ${KONG_GATEWAY_IMAGE:-kong/kong-gateway:3.10.0.2}
+    image: ${KONG_GATEWAY_IMAGE:-kong/kong-gateway:3.16.0.1}
     restart: unless-stopped
     environment:
       KONG_ROLE: data_plane
+      KONG_KONNECT_MODE: "on"
       KONG_DATABASE: "off"
       KONG_VITALS: "off"
       KONG_PROXY_LISTEN: "0.0.0.0:8000"
@@ -16,8 +17,9 @@ services:
       KONG_CLUSTER_TELEMETRY_SERVER_NAME: ${KONG_CLUSTER_TELEMETRY_SERVER_NAME:?Set KONG_CLUSTER_TELEMETRY_SERVER_NAME in .env}
       KONG_CLUSTER_CERT: /run/secrets/konnect-cluster.crt
       KONG_CLUSTER_CERT_KEY: /run/secrets/konnect-cluster.key
+      KONG_LUA_SSL_TRUSTED_CERTIFICATE: system
     ports:
-      - "8000:8000"
+      - "127.0.0.1:${KONG_PROXY_PORT:-8000}:8000"
     secrets:
       - konnect-cluster.crt
       - konnect-cluster.key
@@ -46,10 +48,11 @@ services:
       KONG_MODEL: ${KONG_MODEL:-my-gpt}
       KONG_CONNECT_TIMEOUT: ${KONG_CONNECT_TIMEOUT:-2s}
       KONG_READ_TIMEOUT: ${KONG_READ_TIMEOUT:-30s}
+      RAG_MODE: gateway
     depends_on:
       - kong
     ports:
-      - "8080:8080"
+      - "127.0.0.1:${CHATBOT_PORT:-8080}:8080"
     networks:
       - chatbot
 

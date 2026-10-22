@@ -10,5 +10,9 @@ output "kong_proxy_url" {
 
 output "redis_container_name" {
   description = "Redis Stack container name. Redis is not published on a host port."
-  value       = docker_container.vector_db.name
+  value       = var.mode == "konnect" ? docker_container.vector_db[0].name : null
+}
+
+output "mode" {
+  value = var.mode
 }
