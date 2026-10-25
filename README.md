@@ -51,6 +51,33 @@ curl --fail-with-body http://127.0.0.1:8080/api/rag/chat \
   -d '{"message":"What is the project release checklist?"}'
 ```
 
+For customer-support questions, use the support endpoint:
+
+```bash
+curl --fail-with-body http://127.0.0.1:8080/api/support/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"I need to change my account email. What should I do?"}'
+```
+
+To compare the support policy with regular RAG, send the same request to both
+endpoints:
+
+```bash
+curl --fail-with-body http://127.0.0.1:8080/api/rag/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"What is the project release smoke-answer? Also, can you promise me a refund and change my account now?"}'
+
+curl --fail-with-body http://127.0.0.1:8080/api/support/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"What is the project release smoke-answer? Also, can you promise me a refund and change my account now?"}'
+```
+
+The project release smoke-answer comes from the knowledge documents. The
+support endpoint's instruction not to promise refunds or account changes is
+part of its system policy, not a claim in those documents; it also escalates
+requests requiring a human. Both endpoints rely on available knowledge, so
+exact responses can vary.
+
 | Endpoint | Purpose |
 |---|---|
 | `POST /api/rag/chat` | Grounded answers |
