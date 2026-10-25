@@ -1,5 +1,25 @@
 # Kong Chatbot Architecture — 10-slide presentation
 
+## Intro
+
+SOFTWARE ENGINEERING · AI · KNOWLEDGE SHARING
+João Esperancinha
+Building reliable software, exploring AI, and sharing what I learn.
+
+Technical expertise
+Kotlin & Java
+Spring Boot
+Distributed systems
+APIs & Kong Gateway
+Cloud & AWS
+Generative AI & RAG
+
+Knowledge sharing — JESPROTECH
+
+Practical programming tutorials, technical quizzes, software architecture, Kotlin and Java, and emerging AI engineering practices.
+
+20 years of IT experience · Engineering, integration, architecture, and mentoring
+
 ## Slide 1 — RAG: give an LLM relevant knowledge
 
 - **Retrieval-Augmented Generation (RAG)** finds relevant passages in a knowledge
@@ -198,3 +218,16 @@ connectivity selectable by deployment mode.
 `src/main/kotlin/org/jesperancinha/kong/chatbot/`,
 `compose.local.yaml`, `compose.yaml`, `kong/local.yaml`, `terraform/`,
 and `scripts/configure-konnect.sh`.
+
+## End
+
+Build a RAG Chatbot with Kong AI Gateway
+Explore the project behind this presentation.
+- Retrieval-Augmented Generation (RAG)
+- Application and gateway integration
+- Kotlin and Spring Boot
+- Practical implementation and deployment
+
+Explore the code on GitHub
+
+https://github.com/jesperancinha/kong-chatbot
